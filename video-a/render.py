@@ -153,7 +153,8 @@ class FaceReader:
         self.proc = subprocess.Popen(
             [ff, "-loglevel", "error", "-ss", f"{shot.offset:.3f}", "-i", str(HEDRA),
              "-t", f"{shot.duration:.3f}", "-vf", f"scale={W}:{H},fps={FPS}",
-             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL)  # closing early at the shot cut breaks its pipe
         self.last = None
 
     def next(self):
