@@ -9,6 +9,7 @@ the cut lines up with a real read and the .srt doubles as a teleprompter.
     python3 render.py --only b1  # re-render a single shot, then re-merge
 """
 import argparse
+import json
 import math
 import random
 import shutil
@@ -25,6 +26,7 @@ BUILD = ROOT / "build"
 W, H, FPS = 1920, 1080, 30
 READ_WPM = 190          # conversational read; the script targets 190-200
 SENTENCE_GAP = 0.35     # breath between sentences, seconds
+VO_TAIL = 0.45          # air after the last word of a shot
 
 # Palette lifted from the scripts page so graphics match the rundown.
 GROUND = (19, 23, 28)
@@ -90,25 +92,43 @@ def sentence_dur(text):
 
 
 class Shot:
+    """A run of voiceover lines over one visual. Timing comes from the
+    ElevenLabs character alignment in build/vo/<key>.json when it exists,
+    otherwise from a READ_WPM estimate."""
+
     def __init__(self, key, lines, draw, hold=0.0, tally=None):
         self.key = key
         self.lines = lines          # voiceover sentences covered by this shot
         self.draw = draw            # draw(img, t, shot) -> None
         self.hold = hold            # silent tail, seconds
         self.tally = tally          # None, or number of struck failures
-        self.starts = []
-        acc = 0.0
-        for line in lines:
-            self.starts.append(acc)
-            acc += sentence_dur(line)
-        self.duration = acc + hold
+        self.offset = 0.0           # start of this shot in the whole cut
+        self.starts, self.ends = [], []
+        vo = BUILD / "vo" / f"{key}.json"
+        if vo.exists():
+            al = json.loads(vo.read_text())
+            begin, stop = al["character_start_times_seconds"], al["character_end_times_seconds"]
+            pos = 0
+            for line in lines:
+                i = al["text"].index(line, pos)
+                self.starts.append(begin[i])
+                self.ends.append(stop[i + len(line) - 1])
+                pos = i + len(line)
+            self.duration = self.ends[-1] + VO_TAIL + hold
+        else:
+            acc = 0.0
+            for line in lines:
+                self.starts.append(acc)
+                self.ends.append(acc + sentence_dur(line) - SENTENCE_GAP)
+                acc += sentence_dur(line)
+            self.duration = acc + hold
 
     def line_start(self, i):
         return self.starts[i]
 
     def word_time(self, i, frac):
         """Time at which fraction `frac` of sentence i has been read."""
-        return self.starts[i] + frac * (sentence_dur(self.lines[i]) - SENTENCE_GAP)
+        return self.starts[i] + frac * (self.ends[i] - self.starts[i])
 
 
 # ---------------------------------------------------------------- shared drawing
@@ -123,10 +143,58 @@ def presenter():
     return _presenter
 
 
+HEDRA = BUILD / "hedra" / "presenter.mp4"
+
+
+class FaceReader:
+    """Streams the Hedra lip-sync frames for one shot, in step with render."""
+
+    def __init__(self, ff, shot):
+        self.proc = subprocess.Popen(
+            [ff, "-loglevel", "error", "-ss", f"{shot.offset:.3f}", "-i", str(HEDRA),
+             "-t", f"{shot.duration:.3f}", "-vf", f"scale={W}:{H},fps={FPS}",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+        self.last = None
+
+    def next(self):
+        buf = self.proc.stdout.read(W * H * 3)
+        if len(buf) == W * H * 3:
+            self.last = Image.frombytes("RGB", (W, H), buf)
+        return self.last            # past the end of the take: hold last frame
+
+    def close(self):
+        self.proc.stdout.close()
+        self.proc.wait()
+
+
+def face(shot):
+    """Current talking-head frame, or the still when there's no Hedra take."""
+    return getattr(shot, "face", None) or presenter()
+
+
+def draw_pip(img, shot):
+    """Presenter keeps talking in the corner while a graphic holds the frame."""
+    if getattr(shot, "face", None) is None:
+        return
+    pw, ph = 400, 225
+    x, y = W - pw - 56, H - ph - 56
+    src = shot.face
+    sw, sh = src.size
+    # frame the head and shoulders rather than the whole room
+    box = (sw * 0.30, sh * 0.02, sw * 0.72, sh * 0.02 + sw * 0.42 * ph / pw)
+    tile = src.resize((pw, ph), Image.BICUBIC, box=box)
+    mask = Image.new("L", (pw, ph), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, pw - 1, ph - 1), 18, fill=255)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((x - 4, y - 4, x + pw + 3, y + ph + 3), 21, fill=RULE)
+    img.paste(tile, (x, y), mask)
+
+
 def draw_presenter(img, t, shot, focus=(1010, 330), z0=1.0, z1=1.07):
     """Slow push-in towards the face."""
-    src = presenter()
+    src = face(shot)
     sw, sh = src.size
+    focus = (focus[0] * sw / 2000, focus[1] * sh / 1116)
     k = ease_in_out(t / shot.duration)
     zoom = z0 + (z1 - z0) * k
     ch = sh / zoom
@@ -295,7 +363,7 @@ def draw_spine(img, t, shot):
            font=font("Newsreader-Regular", 32), fill=DIM, anchor="lm")
     nw, nh, gap = 460, 380, 150
     x0 = (W - (3 * nw + 2 * gap)) / 2
-    y0 = 400
+    y0 = 300
     f_name = font("Archivo-Bold", 64)
     f_role = font("Archivo-Medium", 24)
     f_job = font("Newsreader-Regular", 32)
@@ -326,7 +394,7 @@ def draw_spine(img, t, shot):
 def draw_schedule(img, t, shot):
     """Schedule editor mock: interval on agent one, Monday cadence on two and three."""
     d = ImageDraw.Draw(img)
-    px, py, pw, ph = 360, 180, W - 720, 620
+    px, py, pw, ph = 360, 140, W - 720, 620
     d.rounded_rectangle((px, py, px + pw, py + ph), 20, fill=PANEL, outline=RULE, width=2)
     d.text((px + 56, py + 70), "Schedules", font=font("Archivo-Bold", 44), fill=INK, anchor="lm")
     d.line((px + 56, py + 120, px + pw - 56, py + 120), fill=RULE, width=2)
@@ -438,10 +506,14 @@ def render_shot(shot, ff):
            "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
            str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    reader = FaceReader(ff, shot) if HEDRA.exists() else None
     for f in range(n):
         t = f / FPS
+        shot.face = reader.next() if reader else None
         img = Image.new("RGB", (W, H), GROUND)
         shot.draw(img, t, shot)
+        if shot.draw not in (draw_presenter_tally, draw_presenter_plain):
+            draw_pip(img, shot)
         if shot.tally is not None:
             draw_tally(img, t, shot.tally)
         # short fade from/to black at the head and tail of the whole cut
@@ -452,9 +524,39 @@ def render_shot(shot, ff):
                               clamp((shot.duration - t) / 0.6))
         proc.stdin.write(img.tobytes())
     proc.stdin.close()
+    if reader:
+        reader.close()
     if proc.wait() != 0:
         sys.exit(f"ffmpeg failed on shot {shot.key}")
     print(f"  {shot.key}: {shot.duration:5.1f}s  {n} frames")
+
+
+def layout():
+    clock = 0.0
+    for shot in SHOTS:
+        shot.offset = clock
+        clock += shot.duration
+    return clock
+
+
+def build_voiceover(ff):
+    """One continuous voice track: each shot's ElevenLabs read, padded to the
+    shot's length. Hedra lip-syncs to this, so it must match the cut exactly."""
+    out = BUILD / "vo" / "full.wav"
+    missing = [s.key for s in SHOTS if not (BUILD / "vo" / f"{s.key}.mp3").exists()]
+    if missing:
+        print(f"  no voiceover for {', '.join(missing)}: run voice.py; merging silent")
+        return None
+    cmd = [ff, "-y", "-loglevel", "error"]
+    for s in SHOTS:
+        cmd += ["-i", str(BUILD / "vo" / f"{s.key}.mp3")]
+    chains = "".join(f"[{i}:a]aresample=48000,apad,atrim=0:{s.duration:.3f}[a{i}];"
+                     for i, s in enumerate(SHOTS))
+    chains += "".join(f"[a{i}]" for i in range(len(SHOTS)))
+    chains += f"concat=n={len(SHOTS)}:v=0:a=1[out]"
+    subprocess.run(cmd + ["-filter_complex", chains, "-map", "[out]", "-ac", "1", str(out)],
+                   check=True)
+    return out
 
 
 def merge(ff):
@@ -462,9 +564,11 @@ def merge(ff):
     listing.write_text("".join(f"file 'shots/{s.key}.mp4'\n" for s in SHOTS))
     out = BUILD / "video-a.mp4"
     total = sum(s.duration for s in SHOTS)
+    vo = build_voiceover(ff)
+    audio = ["-i", str(vo)] if vo else ["-f", "lavfi", "-t", f"{total:.3f}",
+                                        "-i", "anullsrc=r=48000:cl=stereo"]
     subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
-                    "-i", str(listing), "-f", "lavfi", "-t", f"{total:.3f}",
-                    "-i", "anullsrc=r=48000:cl=stereo", "-c:v", "copy", "-c:a", "aac",
+                    "-i", str(listing), *audio, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                     "-shortest", "-movflags", "+faststart", str(out)], check=True)
     return out
 
@@ -479,7 +583,7 @@ def write_srt():
     for shot in SHOTS:
         for i, line in enumerate(shot.lines):
             a = clock + shot.starts[i]
-            b = a + sentence_dur(line) - SENTENCE_GAP
+            b = clock + shot.ends[i]
             cues.append((a, b, line))
         clock += shot.duration
     out = BUILD / "video-a.srt"
@@ -491,8 +595,14 @@ def write_srt():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", help="comma-separated shot keys to re-render")
+    ap.add_argument("--voice-only", action="store_true",
+                    help="just build build/vo/full.wav (for hedra.py)")
     args = ap.parse_args()
     ff = ffmpeg_exe()
+    layout()
+    if args.voice_only:
+        print(f"voice track -> {build_voiceover(ff)}")
+        return
     keys = set(args.only.split(",")) if args.only else {s.key for s in SHOTS}
     print("rendering shots")
     for shot in SHOTS:
