@@ -34,6 +34,8 @@ def voice(shot):
 def main():
     only = set(sys.argv[1:])
     for shot in render.SHOTS:
+        if not shot.lines:
+            continue
         done = (render.BUILD / "vo" / f"{shot.key}.mp3").exists()
         if (only and shot.key in only) or (not only and not done):
             print(f"  {shot.key}: {voice(shot):.1f}s")

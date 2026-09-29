@@ -142,7 +142,7 @@ function cam(enterAt=0.2,size=330){
 }
 
 // ------------------------------------------------------------------ tally
-function tally(struck, strikeAt=null){
+function tally(struck=(S.params&&S.params.tally)||0, strikeAt=null){
   const box=el('div'); box.id='tally';
   const bars=[...Array(5)].map(()=>el('i','',box));
   const lab=el('div','',box,`<b>${struck}/5</b><small>FAILURES</small>`);
@@ -395,6 +395,505 @@ SCENES.scorecard=()=>{
     for(const [s,d] of stats){const k=spring((t-s+.1)/.7); d.style.opacity=clamp((t-s+.1)*5); d.style.transform=`translateY(${(1-k)*90}px)`;}
     bill.style.opacity=ramp(t,billAt,.5);
     tl(t); camIn(t);
+  };
+};
+
+// ================================================================== shared
+const P=()=>S.params||{};
+function wAt(spec){ // [line, word, nth?] -> time
+  return wordAt(spec[0], spec[1], spec[2]||0);
+}
+function pop(d,s,dist=60,dur=.7){ // spring an element up into place at time s
+  return t=>{const k=spring((t-s)/dur); d.style.opacity=clamp((t-s)*5);
+    d.style.transform=`translateY(${(1-k)*dist}px)`;};
+}
+function makePills(list){
+  return (list||[]).map(([ln,w,h,nth])=>{const p=el('div','pill','',h);p.style.opacity=0;return [wordAt(ln,w,nth||0),p]});
+}
+function runPills(pills,t){
+  for(const [s,p] of pills){
+    const a=ramp(t,s-.15,.3), b=1-ramp(t,s+2.0,.3);
+    const k=Math.min(a,b); p.style.opacity=k;
+    p.style.transform=`translateX(-50%) translateY(${(1-spring((t-s+.15)/.6))*40}px) scale(${lerp(.92,1,a)})`;
+  }
+}
+function theme(name){
+  if(name==='paper'){stage.className='paper'; stage.style.background='var(--paper)'}
+  else if(name==='orange'){stage.style.background='var(--orange)'}
+  else {stage.style.background='radial-gradient(ellipse at 30% 40%,#1c1612 0%,#0c0b0a 70%)'}
+}
+// tally with the n-th bar striking on at time `at`
+function tallyStrike(n,at){
+  const box=el('div'); box.id='tally';
+  const bars=[...Array(5)].map(()=>el('i','',box));
+  const lab=el('div','',box,`<b>${n-1}/5</b><small>FAILURES</small>`); const b=lab.querySelector('b');
+  return t=>{
+    const on=t>=at;
+    b.textContent=(on?n:n-1)+'/5';
+    bars.forEach((bar,i)=>{
+      const lit=i<n-1 || (i===n-1&&on);
+      bar.style.background=lit?'var(--orange)':'#3a342e';
+      bar.style.boxShadow=lit?'0 0 18px rgba(255,90,31,.7)':'none';
+      bar.style.transform= i===n-1&&on ? `scaleY(${spring((t-at)/.5)}) scaleX(${1+.8*(1-ramp(t,at,.6))})` : '';
+    });
+    box.style.boxShadow= on&&t<at+.8 ? `0 0 0 1px rgba(255,255,255,.08),0 0 ${60*(1-ramp(t,at,.8))}px rgba(255,90,31,.8)`:'0 0 0 1px rgba(255,255,255,.08)';
+  };
+}
+function panel(parent,style){const d=el('div','abs',parent);Object.assign(d.style,{borderRadius:'28px',background:'#191714',boxShadow:'0 0 0 1px rgba(255,255,255,.07),0 40px 80px rgba(0,0,0,.5)'},style||{});return d}
+
+// ================================================================== generic presenter
+SCENES.presenter=()=>{
+  const z=P().zoom||[1.0,1.07];
+  faceFull(z[0],z[1]);
+  const pills=makePills(P().pills);
+  const tl=tally();
+  return t=>{runPills(pills,t); tl(t)};
+};
+
+// ================================================================== text card
+SCENES.textCard=()=>{
+  const th=P().theme||'dark'; theme(th);
+  const ink= th==='dark'?'var(--cream)':'var(--ink)';
+  if(th==='dark'){const glow=el('div','fill');glow.style.background='radial-gradient(circle at 80% 70%,rgba(255,90,31,.16),transparent 45%)'}
+  const col=el('div','abs'); Object.assign(col.style,{left:'150px',right:'150px',top:0,bottom:0,display:'flex',flexDirection:'column',justifyContent:'center',gap:'22px'});
+  const anims=(P().blocks||[]).map(b=>{
+    const d=el('div',b.serif?'serif':'mega',col,b.html);
+    Object.assign(d.style,{fontSize:b.size+'px',color:b.color||ink,fontStyle:b.italic?'italic':'normal',lineHeight:b.serif?'1.15':'.95'});
+    if(b.serif) d.style.letterSpacing='-.01em';
+    return pop(d,wAt(b.at)-.12,70);
+  });
+  const camIn=cam(.15,280); const tl=tally();
+  return t=>{anims.forEach(a=>a(t)); camIn(t); tl(t)};
+};
+
+// ================================================================== failure title
+SCENES.failureTitle=()=>{
+  const n=P().n; faceFull(1.02,1.08);
+  const chip=el('div','abs'); Object.assign(chip.style,{left:'64px',top:'56px',padding:'16px 26px',borderRadius:'18px',background:'var(--orange)',color:'var(--ink)',fontWeight:900,fontSize:'30px',zIndex:44});
+  chip.innerHTML=`FAILURE 0${n} <span style="font-weight:500;opacity:.8">· ${P().title.replace('<br>',' ')}</span>`;
+  const slab=el('div','fill'); slab.style.background='var(--orange)'; slab.style.zIndex=41;
+  const big=el('div','abs mega',slab,'0'+n); Object.assign(big.style,{right:'-40px',top:'40px',fontSize:'900px',color:'transparent',WebkitTextStroke:'6px rgba(21,18,15,.28)'});
+  const kick=el('div','abs',slab,`FAILURE 0${n} OF 05`); Object.assign(kick.style,{left:'130px',top:'280px',fontWeight:900,fontSize:'34px',letterSpacing:'.3em',color:'#2a130a'});
+  const title=el('div','abs mega',slab,P().title); Object.assign(title.style,{left:'124px',top:'350px',fontSize:'150px',color:'var(--ink)'});
+  const tl=tallyStrike(n,.9);
+  const out= S.duration>5.2 ? 3.3 : 1e9;
+  return t=>{
+    const k=ramp(t,0,.45,outExpo);
+    title.style.transform=`translateX(${(1-k)*-160}px)`; title.style.opacity=k;
+    kick.style.opacity=ramp(t,.15,.4);
+    big.style.transform=`translateX(${(1-k)*200}px) scale(${1+.02*t})`;
+    const o=ramp(t,out,.45,inOut);
+    slab.style.clipPath=`inset(0 0 ${o*100}% 0)`;
+    chip.style.opacity=ramp(t,out+.3,.4); chip.style.transform=`translateY(${(1-ramp(t,out+.3,.5))*-30}px)`;
+    tl(t);
+  };
+};
+
+// ================================================================== week one page
+SCENES.weekOne=()=>{
+  theme('paper');
+  const items=[['Open-weights model tops a coding benchmark','#ff5a1f','#ffb13d'],['Agent SDK adds scheduled runs','#1e8fb0','#7fc4d6'],
+               ['Video model ships a 4K mode','#6a4bd8','#b59cff'],['Browser agent opens its beta','#2f8f5b','#8fd694'],['Voice API cuts latency in half','#d6336c','#ff9fc0']];
+  const sheet=el('div','sheet'); Object.assign(sheet.style,{left:'470px',top:'90px',width:'980px',padding:'46px 52px'});
+  sheet.innerHTML=`<div style="font-weight:700;letter-spacing:.2em;font-size:20px;color:#9a8f80">ATLAS · MONDAY 07:00</div>
+    <div class="mega" style="font-size:74px;color:var(--ink);margin:10px 0 26px">AI launches, week 1</div>`;
+  items.forEach(([h,a,b],i)=>{
+    const r=el('div','',sheet); Object.assign(r.style,{display:'flex',alignItems:'center',gap:'28px',padding:'20px 0',borderTop:'1px solid #ece4d6'});
+    r.innerHTML=`<div style="width:170px;height:100px;border-radius:14px;flex:none;background:linear-gradient(135deg,${a},${b});position:relative;overflow:hidden">
+        <div style="position:absolute;width:90px;height:90px;border-radius:50%;background:rgba(255,255,255,.28);right:-20px;top:-26px"></div>
+        <div style="position:absolute;width:60px;height:60px;border-radius:12px;background:rgba(0,0,0,.14);left:18px;bottom:-14px;transform:rotate(18deg)"></div></div>
+      <div><div style="font-weight:900;font-size:32px;color:var(--ink)">${h}</div>
+      <div style="margin-top:8px;font-size:22px;color:#8a7b68">Day ${i+1} · <span style="color:#1e6fd6;text-decoration:underline">source ↗</span></div></div>`;
+  });
+  const badge=el('div','abs',null,'✓ 5/5 sourced'); Object.assign(badge.style,{left:'1260px',top:'130px',padding:'14px 24px',borderRadius:'30px',background:'#2f8f5b',color:'#fff',fontWeight:900,fontSize:'28px',zIndex:5});
+  const note=el('div','abs serif'); Object.assign(note.style,{left:'1000px',top:'330px',width:'820px',fontSize:'82px',lineHeight:'1.05',color:'var(--ink)'});
+  note.innerHTML='Week one looks<br>exactly like<br><i style="color:var(--orange)">the prompts.</i>';
+  const note2=el('div','abs serif',null,'Marked on the exact paper it revised for.'); Object.assign(note2.style,{left:'1004px',top:'690px',width:'780px',fontSize:'44px',fontStyle:'italic',color:'#6f6253'});
+  const face=el('div','cam'); Object.assign(face.style,{boxShadow:'0 40px 80px rgba(60,40,20,.3),0 0 0 6px #fbf8f2'});
+  const c=el('canvas','',face); c.width=c.height=400; faceCanvases.push({canvas:c,kind:'bubble'});
+  const tl=tally();
+  const srcAt=wordAt(1,'sources'), shift=S.lines[2].t0-.2, markAt=wordAt(3,'marked');
+  return t=>{
+    const sk=spring(t/.9); const sh=ramp(t,shift,.8,inOut);
+    sheet.style.transform=`translate(${-sh*380}px,${(1-sk)*120 - inOut(t/shift)*220*(1-sh)}px) scale(${1-sh*.3})`;
+    sheet.style.transformOrigin='left top'; sheet.style.opacity=clamp(t*3)*(1-.35*sh);
+    const bk=spring((t-srcAt)/.6); badge.style.opacity=clamp((t-srcAt)*5)*(1-sh); badge.style.transform=`scale(${lerp(.5,1,clamp(bk))}) rotate(${(1-bk)*-8}deg)`;
+    note.style.opacity=ramp(t,shift+.3,.5); note.style.transform=`translateY(${(1-ramp(t,shift+.3,.6))*40}px)`;
+    note2.style.opacity=ramp(t,markAt-.1,.5);
+    face.style.transform=`translateY(${(1-spring((t-.3)/.9))*420}px)`;
+    tl(t);
+  };
+};
+
+// ================================================================== run chain stops amber
+SCENES.runChain=()=>{
+  theme('dark');
+  const grid=el('div','fill'); grid.style.background='radial-gradient(circle,#2a2520 1.6px,transparent 1.8px) 0 0/44px 44px';
+  const head=el('div','abs',null,'<div class="kicker">Week two · Monday 07:00</div><div class="mega" style="font-size:92px;margin-top:14px">Everything ran.</div>');
+  Object.assign(head.style,{left:'120px',top:'96px'});
+  const names=[['Scout','research'],['Ridge','judgment'],['Atlas','design'],['Publish','stopped']];
+  const X=[120,560,1000,1440], Y=430;
+  const nodes=names.map(([n],i)=>{const d=panel(null,{left:X[i]+'px',top:Y+'px',width:'360px',height:'220px',padding:'34px'});
+    d.innerHTML=`<div style="font-weight:900;font-size:54px">${n}</div><div class="st" style="margin-top:18px;font-weight:700;font-size:24px;letter-spacing:.14em;color:var(--mute)">QUEUED</div>
+      <div class="ring" style="position:absolute;right:30px;top:36px;width:34px;height:34px;border-radius:50%;background:#3a342e"></div>`;return d});
+  const links=[0,1,2].map(i=>{const l=el('div','abs');Object.assign(l.style,{left:(X[i]+360)+'px',top:(Y+108)+'px',height:'5px',width:'80px',background:'#3a342e',borderRadius:'3px'});return l});
+  const wait=el('div','abs',null,'Waiting for approval'); Object.assign(wait.style,{left:'1440px',top:(Y+250)+'px',width:'360px',textAlign:'center',fontWeight:900,fontSize:'30px',color:'#ffb13d'});
+  const cap=el('div','abs serif',null,'Not an error. <i>The correct setting.</i>'); Object.assign(cap.style,{left:'120px',top:'820px',fontSize:'54px'});
+  const camIn=cam(.2,260); const tl=tally();
+  const times=names.map(([_,w])=>wordAt(0,w)); const setAt=S.lines[1].t0;
+  return t=>{
+    head.style.opacity=ramp(t,0,.5);
+    nodes.forEach((d,i)=>{
+      const s=times[i], ok=t>=s, st=d.querySelector('.st'), ring=d.querySelector('.ring');
+      d.style.opacity=.35+.65*ramp(t,s-.4,.4);
+      if(i<3){
+        st.textContent=ok?'✓ COMPLETED':'QUEUED'; st.style.color=ok?'var(--green)':'var(--mute)';
+        ring.style.background=ok?'var(--green)':'#3a342e'; ring.style.boxShadow=ok?'0 0 24px var(--green)':'none';
+        d.style.boxShadow= ok?'0 0 0 2px rgba(143,214,148,.6),0 40px 80px rgba(0,0,0,.5)':'0 0 0 1px rgba(255,255,255,.07)';
+      }else{
+        const pulse=.5+.5*Math.sin((t-s)*5);
+        st.textContent=ok?'PAUSED':'QUEUED'; st.style.color=ok?'#ffb13d':'var(--mute)';
+        ring.style.background=ok?'#ffb13d':'#3a342e'; ring.style.boxShadow=ok?`0 0 ${10+30*pulse}px #ffb13d`:'none';
+        d.style.boxShadow= ok?`0 0 0 ${2+2*pulse}px rgba(255,177,61,.8),0 0 ${60*pulse}px rgba(255,177,61,.35)`:'0 0 0 1px rgba(255,255,255,.07)';
+      }
+      d.style.transform=`scale(${1+.04*(1-ramp(t,s,.4))*(t>=s?1:0)})`;
+    });
+    links.forEach((l,i)=>{const on=t>=times[i]; l.style.background=on?'var(--green)':'#3a342e'; l.style.boxShadow=on?'0 0 14px var(--green)':'none'});
+    wait.style.opacity=t>=times[3]?.6+.4*Math.sin((t-times[3])*5):0;
+    cap.style.opacity=ramp(t,setAt-.1,.5);
+    camIn(t); tl(t);
+  };
+};
+
+// ================================================================== approval queue, six days old
+SCENES.approvalQueue=()=>{
+  theme('dark');
+  const world=el('div','fill'); world.style.transformOrigin='1520px 470px';
+  const side=panel(world,{left:'80px',top:'80px',width:'300px',height:'920px',borderRadius:'24px'});
+  side.innerHTML=['Home','Agents','Schedules','Needs attention','Library'].map((x,i)=>`<div style="padding:22px 30px;font-weight:700;font-size:26px;color:${i===3?'var(--cream)':'var(--mute)'};${i===3?'background:#26221e;border-radius:14px;margin:0 12px':''}">${x}${i===3?' <span style="background:var(--orange);color:#fff;border-radius:12px;padding:2px 10px;font-size:20px">1</span>':''}</div>`).join('');
+  const main=panel(world,{left:'420px',top:'80px',width:'1420px',height:'920px',borderRadius:'24px',padding:'50px 60px'});
+  main.innerHTML=`<div class="mega" style="font-size:72px">Needs attention</div><div style="color:var(--mute);font-size:26px;margin-top:10px">Runs paused until you decide</div>
+   <div style="margin-top:50px;border-radius:20px;background:#221f1b;padding:34px 38px;display:flex;align-items:center;gap:26px">
+     <span style="width:22px;height:22px;border-radius:50%;background:#ffb13d;box-shadow:0 0 20px #ffb13d;flex:none"></span>
+     <div style="flex:1"><div style="font-weight:900;font-size:34px">Atlas wants to publish “AI launches, week 2”</div>
+       <div class="chips" style="margin-top:14px;display:flex;gap:12px;font-size:22px;font-weight:700"></div></div>
+     <div class="ts" style="font-weight:900;font-size:34px;color:#ffb13d;white-space:nowrap">just now</div></div>
+   <div style="display:flex;gap:16px;margin-top:26px;margin-left:86px"><span style="padding:14px 30px;border-radius:14px;background:var(--cream);color:var(--ink);font-weight:900;font-size:26px">Approve</span><span style="padding:14px 30px;border-radius:14px;background:#2a2622;font-weight:900;font-size:26px">Deny</span></div>`;
+  const chips=main.querySelector('.chips'), ts=main.querySelector('.ts');
+  const chipEls=['Research ✓','Judgment ✓','Design ✓'].map(x=>{const c=el('span','',chips,x);Object.assign(c.style,{padding:'6px 14px',borderRadius:'10px',background:'rgba(143,214,148,.14)',color:'var(--green)',opacity:0});return c});
+  const camIn=cam(.2,250); const tl=tally();
+  const doneAt=S.lines[1].t0, sixAt=wordAt(2,'six');
+  return t=>{
+    world.style.opacity=ramp(t,0,.4);
+    const days=Math.min(6,Math.floor(6*clamp(t/(sixAt+.1))));
+    ts.textContent= days===0?'just now':days===1?'1 day ago':days+' days ago';
+    chipEls.forEach((c,i)=>{c.style.opacity=ramp(t,doneAt+i*.18,.3)});
+    const z=ramp(t,sixAt-.3,1.2,inOut);
+    world.style.transform=`scale(${1+1.25*z})`;
+    ts.style.textShadow=`0 0 ${30*z}px rgba(255,177,61,.8)`;
+    camIn(t); tl(t);
+  };
+};
+
+// ================================================================== funnel that never narrows
+SCENES.funnel=()=>{
+  theme('dark');
+  const head=el('div','abs',null,'<div class="kicker">Ridge · judgment</div><div class="mega" style="font-size:88px;margin-top:14px">5 in. <span style="color:var(--orange)">5 out.</span> Every week.</div>');
+  Object.assign(head.style,{left:'120px',top:'80px'});
+  const svgNS='http://www.w3.org/2000/svg';
+  const weeks=[1,2,3].map((w,i)=>{
+    const x0=440+i*470, box=el('div','abs'); Object.assign(box.style,{left:(x0-170)+'px',top:'290px',width:'340px',height:'560px'});
+    const svg=document.createElementNS(svgNS,'svg'); svg.setAttribute('width',340);svg.setAttribute('height',560); box.appendChild(svg);
+    svg.innerHTML=`<path d="M20 90 L320 90 L210 330 L210 440 L130 440 L130 330 Z" fill="#1d1a17" stroke="#3a342e" stroke-width="3"/>`;
+    const lab=el('div','',box,`Week ${w}`); Object.assign(lab.style,{position:'absolute',left:0,right:0,top:'500px',textAlign:'center',fontWeight:900,fontSize:'34px',color:'var(--mute)'});
+    const dots=[...Array(5)].map(k=>{const c=document.createElementNS(svgNS,'circle');c.setAttribute('r',18);c.setAttribute('fill','#ffb13d');svg.appendChild(c);return c});
+    return {dots,lab};
+  });
+  const cap=el('div','abs serif',null,'Never once <i style="color:var(--orange)">shorter.</i>'); Object.assign(cap.style,{left:0,right:0,top:'900px',textAlign:'center',fontSize:'64px'});
+  const camIn=cam(.2,240); const tl=tally();
+  const starts=[S.lines[1].t0, S.lines[1].t0+.8, .2]; const capAt=wordAt(2,'never');
+  return t=>{
+    head.style.opacity=ramp(t,0,.5);
+    weeks.forEach((w,i)=>{
+      const s=starts[i];
+      w.lab.style.color= t>s+1.4?'var(--cream)':'var(--mute)';
+      w.dots.forEach((c,k)=>{
+        const p=clamp((t-s-k*.12)/1.3); const e=inOut(p);
+        const xTop=70+k*50, xOut=70+k*50;               // same spread out as in: nothing narrows
+        const y= p<=0?40: p<.5? lerp(40,300,e*2): lerp(300,480,(e-.5)*2);
+        const x= p<.5? lerp(xTop,170,e*1.6>1?1:e*1.6) : lerp(170,xOut,(e-.5)*2);
+        c.setAttribute('cx',x); c.setAttribute('cy',y); c.style.opacity=p>0?1:.25;
+      });
+    });
+    cap.style.opacity=ramp(t,capAt-.1,.5);
+    camIn(t); tl(t);
+  };
+};
+
+// ================================================================== the one-line fix
+SCENES.promptDiff=()=>{
+  theme('paper');
+  const head=el('div','abs serif'); Object.assign(head.style,{left:'120px',top:'120px',fontSize:'96px',lineHeight:'1',color:'var(--ink)'});
+  head.innerHTML='The fix is<br><i style="color:var(--orange)">one line.</i>';
+  const tag=el('div','abs',null,'3 weeks as a formatting step<br><b>1 model call every Monday</b>'); Object.assign(tag.style,{left:'124px',top:'380px',fontSize:'30px',lineHeight:'1.4',color:'#6f6253'});
+  const sheet=el('div','sheet'); Object.assign(sheet.style,{left:'760px',top:'130px',width:'1040px',padding:'50px 56px',fontFamily:'"DejaVu Sans Mono",monospace',fontSize:'27px',lineHeight:'1.65',color:'#3b342c'});
+  sheet.innerHTML=`<div style="font-family:Archivo;font-weight:900;font-size:34px;color:var(--ink);margin-bottom:22px">Ridge · job description</div>
+    Work out which items are worth covering.<br>Return the angle for each item.<br>Give a reason on each.<br>Done = angles + reasons.<br>`;
+  const add=el('div','',sheet); Object.assign(add.style,{marginTop:'18px',padding:'18px 22px',borderRadius:'12px',color:'var(--ink)',fontWeight:700,position:'relative'});
+  const hl=el('div','',add); Object.assign(hl.style,{position:'absolute',inset:0,borderRadius:'12px',background:'rgba(255,90,31,.22)',transformOrigin:'left'});
+  const txt=el('span','',add); txt.style.position='relative';
+  const full='+ Returning zero items is a successful run.\n+ A zero week looks like: "Nothing worth covering this week."';
+  const camIn=cam(.2,260); const tl=tally();
+  const fixAt=wordAt(1,'fix');
+  return t=>{
+    head.style.opacity=ramp(t,fixAt-.2,.5);
+    tag.style.opacity=ramp(t,.4,.5);
+    sheet.style.transform=`translateY(${(1-spring(t/.9))*120}px)`; sheet.style.opacity=clamp(t*3);
+    const n=Math.floor(full.length*clamp((t-fixAt-.3)/2.2));
+    txt.innerHTML=full.slice(0,n).replace(/\n/g,'<br>')+(n<full.length&&t>fixAt?'<span style="opacity:.6">▍</span>':'');
+    hl.style.transform=`scaleX(${ramp(t,fixAt,.5)})`;
+    add.style.opacity=t>=fixAt?1:0;
+    camIn(t); tl(t);
+  };
+};
+
+// ================================================================== the handoff loses its link
+SCENES.handoff=()=>{
+  theme('dark');
+  const grid=el('div','fill'); grid.style.background='radial-gradient(circle,#2a2520 1.6px,transparent 1.8px) 0 0/44px 44px';
+  const names=[['Scout','#7fc4d6'],['Ridge','#ffb13d'],['Atlas','#8fd694']], X=[160,780,1400];
+  names.forEach(([n,c],i)=>{const d=panel(null,{left:X[i]+'px',top:'110px',width:'360px',height:'120px',padding:'30px 34px'});
+    d.innerHTML=`<span style="display:inline-block;width:20px;height:20px;border-radius:50%;background:${c};box-shadow:0 0 14px ${c};margin-right:16px"></span><b style="font-weight:900;font-size:46px">${n}</b>`});
+  [0,1].forEach(i=>{const l=el('div','abs');Object.assign(l.style,{left:(X[i]+370)+'px',top:'168px',width:'250px',height:'4px',background:'var(--orange)',boxShadow:'0 0 14px var(--orange)'})});
+  const card=el('div','abs'); Object.assign(card.style,{width:'560px',top:'330px',borderRadius:'24px',background:'var(--cream)',color:'var(--ink)',padding:'34px 38px',boxShadow:'0 40px 80px rgba(0,0,0,.5)'});
+  card.innerHTML=`<div class="f" style="font-weight:900;font-size:36px">Browser agent opens its beta</div>
+    <div class="f" style="font-size:24px;color:#6f6253;margin-top:10px">Day 4</div>
+    <div class="f para serif" style="font-size:28px;margin-top:14px;color:#3b342c;display:none">Five launches this week: a coding model, a scheduling SDK, a 4K video mode, a browser agent beta and faster voice.</div>
+    <div class="f note serif" style="font-size:26px;margin-top:12px;color:#3b342c">Worth a look for the agents series.</div>`;
+  const link=el('div','abs',null,'🔗 source ↗ launch post'); Object.assign(link.style,{padding:'14px 22px',borderRadius:'14px',background:'#1e6fd6',color:'#fff',fontWeight:900,fontSize:'26px',boxShadow:'0 20px 40px rgba(0,0,0,.4)'});
+  const ghost=el('div','abs',null,'still in the thread'); Object.assign(ghost.style,{left:X[0]+'px',top:'250px',fontWeight:700,fontSize:'24px',color:'#7fb6ff',letterSpacing:'.04em'});
+  const miss=el('div','abs',null,'✕ not in the handoff'); Object.assign(miss.style,{left:(X[1]-40)+'px',top:'250px',fontWeight:900,fontSize:'28px',color:'var(--orange)'});
+  const page=el('div','abs',null,`<div style="font-weight:900;font-size:30px">AI launches, week 2</div><div style="margin-top:14px;font-size:24px;color:#6f6253">Browser agent opens its beta</div><div style="margin-top:12px;padding:10px 16px;border:2px dashed var(--orange);border-radius:10px;color:var(--orange);font-weight:900;font-size:24px">source: —</div>`);
+  Object.assign(page.style,{left:X[2]+'px',top:'330px',width:'420px',borderRadius:'22px',background:'#fbf8f2',color:'var(--ink)',padding:'30px'});
+  const cap=el('div','abs serif',null,'Nothing in the chain did anything <i style="color:var(--orange)">wrong.</i>'); Object.assign(cap.style,{left:'480px',top:'900px',fontSize:'56px'});
+  const camIn=cam(.2,250); const tl=tally();
+  const sumAt=wordAt(0,'summarised'), linksAt=S.lines[1].t0, missAt=wordAt(2,'handoff'), atlasAt=S.lines[3].t0, wrongAt=wordAt(3,'wrong');
+  const para=card.querySelector('.para'), note=card.querySelector('.note'), f=card.querySelectorAll('.f');
+  return t=>{
+    // card rides the chain: Scout -> Ridge at summarise, Ridge -> Atlas at the last line
+    const hop1=ramp(t,sumAt+.4,1.0,inOut), hop2=ramp(t,atlasAt+.3,1.0,inOut);
+    const x= lerp(lerp(X[0]-40,X[1]-40,hop1),X[2]-40,hop2);
+    card.style.left=x+'px'; card.style.opacity=clamp(t*4)*(1-ramp(t,atlasAt+1.1,.4));
+    card.style.transform=`translateY(${(1-spring(t/.8))*100}px) rotate(${Math.sin(hop1*Math.PI)*-3+Math.sin(hop2*Math.PI)*-3}deg)`;
+    const summ=t>=sumAt; para.style.display=summ?'block':'none'; f[0].style.display=summ?'none':'block'; f[1].style.display=summ?'none':'block'; note.style.display=summ?'none':'block';
+    // the link falls off on the first hop
+    const drop=ramp(t,sumAt+.5,1.1,x=>x*x);
+    link.style.left=(X[0]+(1-drop)*0+drop*120)+'px'; link.style.top=(640+drop*420)+'px';
+    link.style.transform=`rotate(${drop*38}deg)`; link.style.opacity=(t<.2?0:1)*(1-ramp(t,sumAt+1.3,.3));
+    // ...and reappears as a ghost back in Scout's thread
+    ghost.style.opacity=ramp(t,linksAt,.4);
+    miss.style.opacity=ramp(t,missAt-.1,.3); miss.style.transform=`scale(${lerp(1.3,1,ramp(t,missAt-.1,.4))})`;
+    page.style.opacity=ramp(t,atlasAt+1.1,.4); page.style.transform=`translateY(${(1-spring((t-atlasAt-1.1)/.7))*60}px)`;
+    cap.style.opacity=ramp(t,wrongAt-.6,.5);
+    camIn(t); tl(t);
+  };
+};
+
+// ================================================================== what a brief must carry
+SCENES.checklist=()=>{
+  theme('paper');
+  const head=el('div','abs serif'); Object.assign(head.style,{left:'470px',top:'100px',fontSize:'84px',lineHeight:'1.02',color:'var(--ink)'});
+  head.innerHTML='Every brief carries<br><i style="color:#8a7b68">four things.</i>';
+  const sheet=el('div','sheet'); Object.assign(sheet.style,{left:'470px',top:'330px',width:'1150px'});
+  const rows=[['goal','The goal'],['inputs','The inputs'],['format','The format of the inputs'],['finished','What finished looks like']].map(([w,label])=>{
+    const r=el('div','row',sheet,`<span class="bx" style="width:44px;height:44px;border-radius:12px;border:3px solid #cfc4b2;margin-right:28px;display:grid;place-items:center;color:#fff;font-weight:900;font-size:28px"></span><span style="font-weight:900">${label}</span>`);
+    return [wordAt(0,w),r.querySelector('.bx')]});
+  const foot=el('div','abs serif',null,'…for a reader with <i style="color:var(--orange)">nothing else in front of them.</i>'); Object.assign(foot.style,{left:'474px',top:'880px',fontSize:'50px',color:'var(--ink)'});
+  const face=el('div','cam'); Object.assign(face.style,{left:'70px',bottom:'auto',top:'330px',width:'340px',height:'400px',boxShadow:'0 40px 80px rgba(60,40,20,.3),0 0 0 6px #fbf8f2'});
+  const c=el('canvas','',face); c.width=340;c.height=400; faceCanvases.push({canvas:c,kind:'bubble'});
+  const tl=tally(); const footAt=wordAt(0,'nothing');
+  return t=>{
+    head.style.opacity=ramp(t,0,.5);
+    sheet.style.transform=`translateY(${(1-spring(t/.9))*120}px)`; sheet.style.opacity=clamp(t*3);
+    for(const [s,bx] of rows){const on=t>=s; bx.style.background=on?'var(--orange)':'transparent'; bx.style.borderColor=on?'var(--orange)':'#cfc4b2';
+      bx.textContent=on?'✓':''; bx.style.transform=`scale(${on?lerp(1.5,1,ramp(t,s,.35)):1})`;}
+    foot.style.opacity=ramp(t,footAt-.1,.5);
+    face.style.transform=`translateX(${(1-spring((t-.2)/.9))*-420}px)`;
+    tl(t);
+  };
+};
+
+// ================================================================== cost per usable page
+SCENES.costChart=()=>{
+  theme('dark');
+  const head=el('div','abs',null,'<div class="kicker">30 days</div><div class="mega" style="font-size:88px;margin-top:14px">Cost per page <span style="color:var(--orange)">×3</span></div>');
+  Object.assign(head.style,{left:'120px',top:'80px'});
+  const cv=el('canvas','abs'); cv.width=1500;cv.height=560; Object.assign(cv.style,{left:'300px',top:'300px'});
+  const g=cv.getContext('2d');
+  const cost=d=>1+2*Math.pow(d/29,1.4), pages=d=> d<12?5:Math.max(1.6,5-(d-12)*.2);
+  const chips=['1 · The expensive model on the heartbeat','2 · A fresh thread on every run'].map((x,i)=>{
+    const c=el('div','abs',null,x); Object.assign(c.style,{left:(300+i*720)+'px',top:'900px',padding:'18px 28px',borderRadius:'16px',background:'#221f1b',fontWeight:900,fontSize:'32px',boxShadow:'0 0 0 1px rgba(255,255,255,.08)'});return c});
+  const legend=el('div','abs',null,'<span style="color:var(--orange)">━ cost per usable page</span> &nbsp;&nbsp; <span style="color:var(--green)">━ usable pages</span>');
+  Object.assign(legend.style,{left:'1200px',top:'130px',fontWeight:700,fontSize:'26px'});
+  const camIn=cam(.2,240); const tl=tally();
+  const twoAt=S.lines[1].t0, drawEnd=S.lines[0].t1||twoAt;
+  return t=>{
+    head.style.opacity=ramp(t,0,.5); legend.style.opacity=ramp(t,.3,.5);
+    const p=clamp((t-.3)/(drawEnd-.3));
+    g.clearRect(0,0,1500,560);
+    g.strokeStyle='#2a2622'; g.lineWidth=2;
+    for(let i=0;i<=4;i++){g.beginPath();g.moveTo(0,40+i*120);g.lineTo(1500,40+i*120);g.stroke()}
+    const X=d=>20+d/29*1460, Yc=v=>520-(v-1)/2*440, Yp=v=>520-(v/5)*440;
+    const upto=29*p;
+    const line=(f,Y,col)=>{g.strokeStyle=col; g.lineWidth=7; g.shadowColor=col; g.shadowBlur=18; g.beginPath();
+      for(let d=0;d<=upto;d+=.25){const y=Y(f(d)); d===0?g.moveTo(X(d),y):g.lineTo(X(d),y)} g.stroke(); g.shadowBlur=0};
+    line(pages,Yp,'#8fd694'); line(cost,Yc,'#ff5a1f');
+    // crossing point
+    let cx=null; for(let d=0;d<29;d+=.1){if(Yc(cost(d))<=Yp(pages(d))){cx=d;break}}
+    if(cx!=null && upto>cx){const k=ramp(t,.3+(drawEnd-.3)*cx/29,.5);
+      g.fillStyle=`rgba(255,255,255,${k})`; g.shadowColor='#fff'; g.shadowBlur=30*k; g.beginPath(); g.arc(X(cx),Yc(cost(cx)),14,0,7); g.fill(); g.shadowBlur=0;}
+    chips.forEach((c,i)=>{const s=twoAt+.2+i*.35; c.style.opacity=ramp(t,s,.3); c.style.transform=`translateY(${(1-spring((t-s)/.6))*40}px)`});
+    camIn(t); tl(t);
+  };
+};
+
+// ================================================================== paying to learn nothing changed
+SCENES.nothingChanged=()=>{
+  theme('dark');
+  const head=el('div','abs',null,'<div class="kicker">Scout · every 30 minutes</div><div class="mega" style="font-size:80px;margin-top:14px">Spent checking: <span id="sp" style="color:var(--orange)">$0.00</span></div>');
+  Object.assign(head.style,{left:'120px',top:'80px'}); const sp=head.querySelector('#sp');
+  const tiles=[]; const cols=8, rows=4;
+  for(let i=0;i<cols*rows;i++){
+    const d=el('div','abs'); Object.assign(d.style,{left:(120+(i%cols)*212)+'px',top:(300+Math.floor(i/cols)*150)+'px',width:'196px',height:'134px',borderRadius:'16px',background:'#1b1916',padding:'16px 18px',boxShadow:'0 0 0 1px rgba(255,255,255,.06)'});
+    d.innerHTML=`<div style="font-size:18px;color:var(--mute);font-weight:700">${String(7+Math.floor(i/2)).padStart(2,'0')}:${i%2?'30':'00'}</div>
+      <div class="stamp" style="margin-top:10px;font-weight:900;font-size:20px;letter-spacing:.06em;color:var(--mute);border:2px solid #3a342e;border-radius:8px;padding:4px 8px;display:inline-block;transform:rotate(-4deg)">NOTHING CHANGED</div>
+      <div style="position:absolute;right:14px;bottom:12px;font-weight:900;font-size:22px;color:var(--orange)">$0.04</div>`;
+    tiles.push(d);
+  }
+  const card=panel(null,{left:'560px',top:'380px',width:'800px',padding:'44px 50px',zIndex:20});
+  card.innerHTML=`<div style="font-weight:700;font-size:24px;letter-spacing:.2em;color:var(--mute)">HEARTBEAT MODEL</div>
+    <div style="margin-top:20px;display:flex;gap:18px"><span class="lg" style="flex:1;text-align:center;padding:22px;border-radius:16px;font-weight:900;font-size:34px">Large</span><span class="sm" style="flex:1;text-align:center;padding:22px;border-radius:16px;font-weight:900;font-size:34px">Small</span></div>
+    <div style="margin-top:22px;font-family:Newsreader;font-style:italic;font-size:34px;color:var(--mute)">The cheap model is there for exactly this. <span style="color:var(--orange)">Never set.</span></div>`;
+  const lg=card.querySelector('.lg'), sm=card.querySelector('.sm');
+  const camIn=cam(.2,240); const tl=tally();
+  const endStamp=S.lines[1].t0-.3, cheapAt=wordAt(1,'cheaper');
+  return t=>{
+    head.style.opacity=ramp(t,0,.4);
+    let spent=0;
+    tiles.forEach((d,i)=>{const s=.3+i*(endStamp-.3)/tiles.length; const on=t>=s;
+      d.style.opacity=on?1:.15; if(on) spent+=.04;
+      const st=d.querySelector('.stamp'); st.style.color=on?'var(--cream)':'var(--mute)'; st.style.borderColor=on?'var(--cream)':'#3a342e';
+      st.style.transform=`rotate(-4deg) scale(${on?lerp(1.6,1,ramp(t,s,.18)):1})`;});
+    sp.textContent='$'+(spent*9).toFixed(2);
+    const k=spring((t-cheapAt+.1)/.7); card.style.opacity=clamp((t-cheapAt+.1)*5); card.style.transform=`translateY(${(1-k)*80}px)`;
+    tiles.forEach(d=>d.style.filter= t>cheapAt?`blur(${3*ramp(t,cheapAt,.4)}px)`:'none');
+    const pulse=.5+.5*Math.sin(t*6);
+    lg.style.background='var(--cream)'; lg.style.color='var(--ink)';
+    sm.style.background='#26221e'; sm.style.color='var(--mute)'; sm.style.boxShadow=`0 0 0 3px rgba(255,90,31,${.4+.6*pulse})`;
+    camIn(t); tl(t);
+  };
+};
+
+// ================================================================== the switch nothing is wired to
+SCENES.toolSwitches=()=>{
+  theme('dark');
+  const head=el('div','abs',null,'<div class="kicker">Scout · tools</div><div class="mega" style="font-size:88px;margin-top:14px">One switch, <span style="color:var(--orange)">no job.</span></div>');
+  Object.assign(head.style,{left:'470px',top:'80px'});
+  const box=panel(null,{left:'470px',top:'300px',width:'1250px',padding:'20px 50px'});
+  const tools=[['Web search','search','used every run'],['Browser','browser','used most runs'],['Publish page','publishing','used: never'],['Email',null,''],['Files',null,'']];
+  const rows=tools.map(([n,w,use],i)=>{const r=el('div','',box); Object.assign(r.style,{display:'flex',alignItems:'center',height:'112px',borderTop:i?'1px solid #2a2622':'0',fontSize:'38px'});
+    r.innerHTML=`<span style="font-weight:900;flex:1">${n}</span><span class="use" style="font-size:26px;font-weight:700;margin-right:40px;color:var(--mute)">${use}</span>
+      <span class="sw" style="width:104px;height:56px;border-radius:28px;background:#2a2622;position:relative;display:inline-block"><span class="kn" style="position:absolute;top:6px;left:6px;width:44px;height:44px;border-radius:50%;background:#6b645b"></span></span>`;
+    return {r,w:w?wordAt(0,w):null,danger:i===2}});
+  const days=el('div','abs serif',null,'Switched on for <b style="font-family:Archivo;font-weight:900">30 days</b>. Used <b style="font-family:Archivo;font-weight:900;color:var(--orange)">0 times</b>.');
+  Object.assign(days.style,{left:'474px',top:'930px',fontSize:'50px'});
+  const camIn=cam(.2,260); const tl=tally(); const daysAt=S.lines[1].t0;
+  return t=>{
+    head.style.opacity=ramp(t,0,.5);
+    rows.forEach(({r,w,danger},i)=>{
+      const on=w!=null&&t>=w, k=w!=null?ramp(t,w,.3):0;
+      const sw=r.querySelector('.sw'), kn=r.querySelector('.kn'), use=r.querySelector('.use');
+      kn.style.left=(6+48*k)+'px'; kn.style.background=on?'#fff':'#6b645b';
+      sw.style.background= on?(danger?'var(--orange)':'#3f7f52'):'#2a2622';
+      const pulse=.5+.5*Math.sin(t*5);
+      sw.style.boxShadow= on&&danger?`0 0 ${20+30*pulse}px rgba(255,90,31,.8)`:'none';
+      use.style.opacity=on?1:.0; use.style.color=danger?'var(--orange)':'var(--green)';
+      r.style.opacity= w==null?.45:1;
+    });
+    days.style.opacity=ramp(t,daysAt-.1,.5);
+    camIn(t); tl(t);
+  };
+};
+
+// ================================================================== four fixes
+SCENES.fourFixes=()=>{
+  theme('dark');
+  const head=el('div','abs',null,'<div class="kicker">What I\'d change</div><div class="mega" style="font-size:92px;margin-top:14px">4 changes. <span style="color:var(--orange)">All cheap.</span></div>');
+  Object.assign(head.style,{left:'470px',top:'70px'});
+  const fixes=[['Approvals land where you already are','Phone and Slack, not a tab.'],['Empty is a valid result','Describe the successful-but-empty run.'],
+               ['Write every brief for amnesia','Including the format the inputs arrive in.'],['Smallest tools. Spend cap. Cheap model.','On anything recurring.']];
+  const rows=fixes.map(([a,b],i)=>{const d=el('div','abs'); Object.assign(d.style,{left:'470px',top:(290+i*175)+'px',display:'flex',gap:'36px',alignItems:'flex-start'});
+    d.innerHTML=`<div class="mega" style="font-size:110px;color:var(--orange);width:150px">0${i+1}</div><div><div style="font-weight:900;font-size:50px;margin-top:8px">${a}</div><div class="serif" style="font-size:36px;font-style:italic;color:#b9b0a4;margin-top:6px">${b}</div></div>`;
+    return pop(d,S.lines[i+1].t0-.1,70)});
+  const camIn=cam(.2,280); const tl=tally();
+  return t=>{head.style.opacity=ramp(t,0,.5); rows.forEach(r=>r(t)); camIn(t); tl(t)};
+};
+
+// ================================================================== alarms on the shape of the output
+SCENES.alarms=()=>{
+  theme('dark');
+  const wall=el('div','abs'); Object.assign(wall.style,{left:'110px',top:'90px',width:'700px',height:'900px',overflow:'hidden',fontFamily:'Newsreader,serif',fontSize:'24px',lineHeight:'1.5',color:'#b9b0a4'});
+  const r=rng(9); let txt='';
+  for(let i=0;i<60;i++) txt+=['Item','Angle','Reason','Source','Cover','Summary'][i%6]+': '+['launch recap','worth covering','fresh angle','benchmark claim','editor note','week digest'][Math.floor(r()*6)]+' · '+['kept','kept','passed','kept'][Math.floor(r()*4)]+'<br>';
+  wall.innerHTML=txt;
+  const head=el('div','abs',null,'<div class="kicker">Don\'t audit the output</div><div class="mega" style="font-size:80px;margin-top:14px">Alarm on its <span style="color:var(--orange)">shape.</span></div>');
+  Object.assign(head.style,{left:'900px',top:'90px'});
+  const alarms=['a run produces nothing','the judgment step passes everything','a page ships without a source','a run costs more than $N'].map((a,i)=>{
+    const d=el('div','abs'); Object.assign(d.style,{left:'900px',top:(330+i*150)+'px',width:'900px',display:'flex',alignItems:'center',gap:'28px'});
+    d.innerHTML=`<span class="bell" style="width:30px;height:30px;border-radius:50%;background:#3a342e;flex:none"></span><span class="tx" style="font-family:'DejaVu Sans Mono',monospace;font-size:38px;font-weight:700"></span>`;
+    return {d,full:'Tell me when '+a+'.',s:S.lines[i+1].t0,e:S.lines[i+1].t1}});
+  const tl=tally(); const auditAt=wordAt(0,'audit');
+  return t=>{
+    const g=ramp(t,auditAt,1.0);
+    wall.style.opacity=1-.75*g; wall.style.filter=`blur(${3*g}px) grayscale(1)`;
+    wall.style.transform=`translateY(${-t*14}px)`;
+    head.style.opacity=ramp(t,.1,.5);
+    alarms.forEach(({d,full,s,e})=>{
+      const n=Math.floor(full.length*clamp((t-s)/Math.max(.6,(e-s)*.9)));
+      d.querySelector('.tx').textContent=t<s?'':full.slice(0,n);
+      const done=n>=full.length, bell=d.querySelector('.bell');
+      bell.style.background=done?'var(--orange)':(t>=s?'#6b645b':'#3a342e');
+      bell.style.boxShadow=done?'0 0 24px var(--orange)':'none';
+    });
+    tl(t);
+  };
+};
+
+// ================================================================== end card: reset, then 30 more days
+SCENES.endCard=()=>{
+  theme('dark');
+  const num=el('div','abs mega'); Object.assign(num.style,{left:0,right:0,top:'250px',textAlign:'center',fontSize:'470px'});
+  const lab=el('div','abs kicker',null,'Days unsupervised'); Object.assign(lab.style,{left:0,right:0,top:'760px',textAlign:'center',fontSize:'34px',letterSpacing:'.42em'});
+  const end=el('div','fill'); end.style.background='radial-gradient(ellipse at 50% 30%,#241510 0%,#0c0b0a 65%)';
+  end.innerHTML=`<div class="kicker" style="position:absolute;left:0;right:0;top:150px;text-align:center">Day one. Again.</div>
+    <div class="mega" style="position:absolute;left:0;right:0;top:210px;text-align:center;font-size:190px">30 more days.</div>`;
+  const names=[['Scout','#7fc4d6'],['Ridge','#ffb13d'],['Atlas','#8fd694']];
+  const fixes=['Approvals → phone','Empty = valid','Briefs for amnesia','Tools · caps · cheap model'];
+  const spine=el('div','abs',end); Object.assign(spine.style,{left:'260px',top:'520px',width:'1400px',display:'flex',justifyContent:'space-between',alignItems:'center'});
+  spine.innerHTML=names.map(([n,c])=>`<div style="padding:26px 48px;border-radius:22px;background:#191714;box-shadow:0 0 0 2px ${c}66,0 0 40px ${c}33;font-weight:900;font-size:56px">${n}</div>`).join('<div style="flex:1;height:5px;margin:0 20px;background:var(--orange);box-shadow:0 0 14px var(--orange)"></div>');
+  const chipRow=el('div','abs',end); Object.assign(chipRow.style,{left:'160px',right:'160px',top:'720px',display:'flex',justifyContent:'center',gap:'22px'});
+  const chips=fixes.map((f,i)=>{const c=el('div','',chipRow,`<b style="color:var(--orange)">0${i+1}</b> ${f}`);Object.assign(c.style,{padding:'16px 26px',borderRadius:'16px',background:'#221f1b',fontWeight:900,fontSize:'28px',whiteSpace:'nowrap',boxShadow:'0 0 0 1px rgba(255,255,255,.08)'});return c});
+  const tl=tally();
+  return t=>{
+    const reset=2.2;
+    const day= t<reset ? Math.max(0,30-Math.floor(30*inOut(t/reset))) : 1;
+    num.textContent=day; num.style.transform=`scale(${t>=reset?1+.15*(1-spring((t-reset)/.6)):1})`;
+    num.style.color= t>=reset?'var(--orange)':'var(--cream)';
+    const e=ramp(t,3.1,.6,inOut);
+    end.style.clipPath=`circle(${e*120}% at 50% 45%)`;
+    end.querySelector('.mega').style.transform=`scale(${lerp(1.1,1,e)})`;
+    chips.forEach((c,i)=>{const s=3.6+i*.2; c.style.opacity=ramp(t,s,.3); c.style.transform=`translateY(${(1-spring((t-s)/.6))*40}px)`});
+    tl(t);
   };
 };
 

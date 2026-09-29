@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Lip-sync the presenter photo to the full voice track with Hedra.
 
-    python3 render.py --voice-only   # builds build/vo/full.wav
-    python3 hedra.py                 # -> build/hedra/presenter.mp4
-    python3 hedra.py --resume <id>   # pick up a generation already queued
+    python3 render.py --voice-only        # builds build/vo/full-<part>.wav
+    python3 hedra.py p2                   # -> build/hedra/p2.mp4
+    python3 hedra.py p2 --resume <id>     # pick up a generation already queued
 
-Needs HEDRA_API_KEY. The result spans the whole cut, so render.py can take
-any shot's frames from it by that shot's offset.
+Needs HEDRA_API_KEY. Each take spans one part of the cut, so render.py can
+take any shot's frames from it by that shot's offset within the part.
 """
 import json
 import mimetypes
@@ -53,11 +53,14 @@ def upload(path, kind):
 
 
 def main():
-    if len(sys.argv) > 2 and sys.argv[1] == "--resume":
-        return wait(sys.argv[2])
-    audio = render.BUILD / "vo" / "full.wav"
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    part = sys.argv[1]
+    if len(sys.argv) > 3 and sys.argv[2] == "--resume":
+        return wait(sys.argv[3], part)
+    audio = render.BUILD / "vo" / f"full-{part}.wav"
     if not audio.exists():
-        sys.exit("no build/vo/full.wav: run `python3 render.py --voice-only` first")
+        sys.exit(f"no {audio.name}: run `python3 render.py --voice-only` first")
     image_id = upload(render.ASSETS / "img" / "presenter.webp", "image")
     audio_id = upload(audio, "audio")
     gen = call("POST", "/generations", {
@@ -68,11 +71,11 @@ def main():
         "generated_video_inputs": {"text_prompt": PROMPT, "resolution": "1080p",
                                    "aspect_ratio": "16:9"},
     })
-    print(f"generation {gen['id']} queued (resume with --resume {gen['id']})", flush=True)
-    wait(gen["id"])
+    print(f"generation {gen['id']} queued (resume with: {part} --resume {gen['id']})", flush=True)
+    wait(gen["id"], part)
 
 
-def wait(gen_id):
+def wait(gen_id, part):
     while True:
         st = call("GET", f"/generations/{gen_id}/status")
         if st.get("status") == "complete":
@@ -81,7 +84,7 @@ def wait(gen_id):
             sys.exit(f"Hedra failed: {st.get('error_message') or st}")
         print(f"  {st.get('status')} {st.get('progress', '')}", flush=True)
         time.sleep(15)
-    out = render.BUILD / "hedra" / "presenter.mp4"
+    out = render.BUILD / "hedra" / f"{part}.mp4"
     out.parent.mkdir(parents=True, exist_ok=True)
     urllib.request.urlretrieve(st.get("download_url") or st["url"], out)
     print(f"-> {out}")
