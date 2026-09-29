@@ -1,0 +1,416 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  Motion graphics for Video A. Every scene is a pure function of time:
+  setup(shot) builds the DOM once, seek(t) sets every style for time t, so
+  motion.py can screenshot any frame in any order. Word timings come from the
+  ElevenLabs alignment, so kinetic type lands on the spoken word.
+-->
+<style>
+  @font-face{font-family:Archivo;font-weight:500;src:url(../assets/fonts/Archivo-Medium.ttf)}
+  @font-face{font-family:Archivo;font-weight:700;src:url(../assets/fonts/Archivo-Bold.ttf)}
+  @font-face{font-family:Archivo;font-weight:900;src:url(../assets/fonts/Archivo-Black.ttf)}
+  @font-face{font-family:Newsreader;font-style:normal;src:url(../assets/fonts/Newsreader-Regular.ttf)}
+  @font-face{font-family:Newsreader;font-style:italic;src:url(../assets/fonts/Newsreader-Italic.ttf)}
+  :root{
+    --night:#0c0b0a; --coal:#171513; --line:#2a2622;
+    --cream:#f1eadf; --paper:#e9e1d3; --ink:#15120f; --mute:#8d857b;
+    --orange:#ff5a1f; --ember:#ff8a3d; --green:#8fd694;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:1920px;height:1080px;overflow:hidden;background:var(--night)}
+  body{font-family:Archivo,sans-serif;color:var(--cream)}
+  #stage{position:absolute;inset:0;overflow:hidden}
+  .abs{position:absolute}
+  .fill{position:absolute;inset:0}
+  canvas{display:block}
+  #grain{position:absolute;inset:0;width:1920px;height:1080px;mix-blend-mode:overlay;opacity:.13;pointer-events:none;z-index:50}
+  #vignette{position:absolute;inset:0;z-index:49;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 45%,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+  /* facecam: rounded square, bottom-left, like the RoboNuggets frame */
+  .cam{position:absolute;left:56px;bottom:56px;width:330px;height:330px;border-radius:44px;overflow:hidden;
+    box-shadow:0 30px 60px rgba(0,0,0,.55),0 0 0 3px rgba(241,234,223,.9);z-index:40}
+  .cam canvas{width:100%;height:100%}
+
+  /* persistent failure counter */
+  #tally{position:absolute;right:64px;top:56px;display:flex;align-items:center;gap:14px;z-index:45;
+    padding:18px 26px;border-radius:22px;background:rgba(12,11,10,.72);backdrop-filter:blur(8px);
+    box-shadow:0 0 0 1px rgba(255,255,255,.08)}
+  #tally i{display:block;width:11px;height:62px;border-radius:6px;background:#3a342e}
+  #tally b{font-weight:900;font-size:34px;margin-left:12px;letter-spacing:-.02em}
+  #tally small{display:block;font-size:14px;font-weight:700;letter-spacing:.18em;color:var(--mute);margin-left:4px}
+
+  .kicker{font-weight:700;font-size:26px;letter-spacing:.24em;text-transform:uppercase;color:var(--orange)}
+  .mega{font-weight:900;letter-spacing:-.045em;line-height:.86}
+  .serif{font-family:Newsreader,serif}
+
+  /* caption pills over the presenter */
+  .pill{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);white-space:nowrap;
+    font-weight:900;font-size:64px;letter-spacing:-.02em;padding:18px 38px 22px;border-radius:22px;
+    background:var(--cream);color:var(--ink);box-shadow:0 24px 50px rgba(0,0,0,.45);z-index:30}
+  .pill em{font-style:normal;color:var(--orange)}
+
+  /* thread-history wall */
+  .runcard{position:absolute;width:330px;height:118px;border-radius:18px;background:#1b1916;
+    box-shadow:0 0 0 1px rgba(255,255,255,.06);padding:18px 22px;font-size:20px}
+  .runcard .d{font-weight:900;font-size:22px;color:var(--cream)}
+  .runcard .m{color:var(--mute);font-weight:500;margin-top:6px}
+  .runcard .s{position:absolute;right:20px;top:20px;width:14px;height:14px;border-radius:50%}
+  .runcard .a{position:absolute;right:22px;bottom:18px;font-weight:700;font-size:18px;letter-spacing:.08em}
+
+  /* node diagram */
+  .node{position:absolute;width:400px;border-radius:28px;background:#191714;padding:34px 38px 38px;
+    box-shadow:0 0 0 1px rgba(255,255,255,.07),0 40px 80px rgba(0,0,0,.5)}
+  .node .ic{width:64px;height:64px;border-radius:18px;display:grid;place-items:center;font-weight:900;font-size:30px;color:var(--ink)}
+  .node h3{font-weight:900;font-size:66px;letter-spacing:-.03em;margin-top:26px}
+  .node .role{font-weight:700;font-size:20px;letter-spacing:.22em;margin-top:6px}
+  .node p{font-family:Newsreader,serif;font-size:30px;line-height:1.3;color:#b9b0a4;margin-top:18px}
+
+  /* paper card scene */
+  .paper{background:var(--paper);color:var(--ink)}
+  .sheet{position:absolute;border-radius:34px;background:#fbf8f2;box-shadow:0 40px 90px rgba(60,40,20,.22),0 0 0 1px rgba(0,0,0,.05)}
+  .row{display:flex;align-items:center;height:118px;padding:0 44px;border-top:1px solid #e8e0d2;font-size:34px}
+  .row:first-child{border-top:0}
+  .row .dot{width:18px;height:18px;border-radius:50%;margin-right:22px}
+  .row .nm{font-weight:900;width:200px}
+  .row .kd{color:#9a8f80;font-weight:500;font-size:24px;flex:1}
+  .row .when{font-weight:700;font-size:28px;padding:14px 28px;border-radius:40px}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="vignette"></div>
+<canvas id="grain" width="480" height="270"></canvas>
+<script>
+// ------------------------------------------------------------------ utils
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const outCubic=x=>1-Math.pow(1-clamp(x),3);
+const outExpo=x=>{x=clamp(x);return x===1?1:1-Math.pow(2,-10*x)};
+const inOut=x=>{x=clamp(x);return x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2};
+const spring=x=>{x=Math.max(0,x);return x>=1.6?1:1-Math.exp(-5.5*x)*Math.cos(9*x)};
+const ramp=(t,s,d,e=outCubic)=>e((t-s)/d);
+const lerp=(a,b,k)=>a+(b-a)*k;
+function rng(seed){let s=seed>>>0;return()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296}}
+function el(tag,cls,parent,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;(parent||stage).appendChild(e);return e}
+const stage=document.getElementById('stage');
+
+// shot state, set by setup()
+let S=null, scene=null, faceBitmap=null;
+const faceCanvases=[];
+
+// word timing helpers: S.words = [{w, t0, t1, line}]
+function wordAt(line, match, nth=0){
+  const hits=S.words.filter(w=>w.line===line && w.w.toLowerCase().replace(/[^a-z0-9']/g,'')===match);
+  return hits[nth] ? hits[nth].t0 : S.lines[line].t0;
+}
+
+// ------------------------------------------------------------------ face
+window.setFace=async function(dataUrl){
+  if(!dataUrl){faceBitmap=null;return}
+  const blob=await (await fetch(dataUrl)).blob();
+  faceBitmap=await createImageBitmap(blob);
+};
+function drawFaces(t){
+  if(!faceBitmap) return;
+  for(const f of faceCanvases){
+    const c=f.canvas, g=c.getContext('2d');
+    const W=faceBitmap.width, H=faceBitmap.height;
+    let sx,sy,sw,sh;
+    if(f.kind==='full'){
+      const z=lerp(f.z0,f.z1,inOut(t/S.duration));
+      sw=W/z; sh=H/z;
+      sx=clamp(W*.505-sw/2,0,W-sw); sy=clamp(H*.30-sh*.30,0,H-sh);
+    }else{ // head-and-shoulders square
+      sw=sh=H*.56; sx=W*.505-sw/2; sy=H*.03;
+    }
+    g.drawImage(faceBitmap,sx,sy,sw,sh,0,0,c.width,c.height);
+  }
+}
+function faceFull(z0=1.0,z1=1.08,parent){
+  const c=el('canvas','fill',parent); c.width=1920;c.height=1080;
+  faceCanvases.push({canvas:c,kind:'full',z0,z1}); return c;
+}
+function cam(enterAt=0.2,size=330){
+  const box=el('div','cam'); box.style.width=box.style.height=size+'px'; const c=el('canvas','',box); c.width=c.height=400;
+  faceCanvases.push({canvas:c,kind:'bubble'});
+  return t=>{const k=spring((t-enterAt)/0.9);
+    box.style.transform=`translateY(${(1-k)*420}px) scale(${lerp(.8,1,clamp(k))})`;
+    box.style.opacity=clamp((t-enterAt)*4)};
+}
+
+// ------------------------------------------------------------------ tally
+function tally(struck, strikeAt=null){
+  const box=el('div'); box.id='tally';
+  const bars=[...Array(5)].map(()=>el('i','',box));
+  const lab=el('div','',box,`<b>${struck}/5</b><small>FAILURES</small>`);
+  return t=>{
+    const inK= strikeAt==null?1:ramp(t,strikeAt+1.7,.5);
+    box.style.opacity=inK; box.style.transform=`translateY(${(1-inK)*-30}px)`;
+    bars.forEach((b,i)=>{
+      const on=i<struck;
+      b.style.background= on?'var(--orange)':'#3a342e';
+      b.style.boxShadow= on?'0 0 18px rgba(255,90,31,.7)':'none';
+      const g= strikeAt==null?1:ramp(t,strikeAt+1.7+i*.09,.25);
+      b.style.transform=`scaleY(${g})`;
+    });
+  };
+}
+
+// ------------------------------------------------------------------ grain
+const grain=document.getElementById('grain').getContext('2d');
+const grainImg=grain.createImageData(480,270);
+function drawGrain(frame){
+  const r=rng(frame*7919+13), d=grainImg.data;
+  for(let i=0;i<d.length;i+=4){const v=r()*255;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255}
+  grain.putImageData(grainImg,0,0);
+}
+
+// ------------------------------------------------------------------ scenes
+const SCENES={};
+
+// 0:00 — 1 → 30 over a sunburst, the number popping on every tick
+SCENES.counter=()=>{
+  stage.style.background='radial-gradient(ellipse at 50% 48%,#241510 0%,#0c0b0a 62%)';
+  const burst=el('canvas','fill'); burst.width=1920;burst.height=1080;
+  const bg=burst.getContext('2d');
+  const r=rng(30), rays=[...Array(140)].map(()=>({a:r()*Math.PI*2,l:.3+r()*.7,w:.6+r()*1.8,s:r()}));
+  const num=el('div','abs mega'); Object.assign(num.style,{left:0,right:0,top:'250px',textAlign:'center',fontSize:'470px'});
+  const lab=el('div','abs kicker'); Object.assign(lab.style,{left:0,right:0,top:'760px',textAlign:'center',fontSize:'34px',letterSpacing:'.42em'});
+  lab.textContent='Days unsupervised';
+  const bar=el('div','abs'); Object.assign(bar.style,{left:'660px',width:'600px',top:'830px',height:'6px',borderRadius:'3px',background:'#2c241e'});
+  const fillb=el('div','abs',bar); Object.assign(fillb.style,{left:0,top:0,bottom:0,borderRadius:'3px',background:'var(--orange)',boxShadow:'0 0 20px var(--orange)'});
+  const camIn=cam(1.0);
+  const tickEnd=S.lines[1].t0+1.5;
+  return t=>{
+    const p=clamp(t/tickEnd), day=t<tickEnd?1+Math.floor(29*inOut(p)):30;
+    const since = t<tickEnd ? (t*29/tickEnd)%1 : (t-tickEnd);
+    const pop = t<tickEnd ? 1+.05*(1-outCubic(since*3)) : 1+.12*(1-spring(since/0.8));
+    num.textContent=day; num.style.transform=`scale(${pop})`;
+    num.style.color= day===30?'#fff':'var(--cream)';
+    num.style.textShadow= day===30?`0 0 ${60+40*Math.sin(t*3)}px rgba(255,90,31,.55)`:'none';
+    fillb.style.width=((day-1)/29*100)+'%';
+    const intro=ramp(t,0,1.2);
+    num.style.opacity=intro; lab.style.opacity=ramp(t,.4,1);
+    // sunburst
+    bg.clearRect(0,0,1920,1080);
+    const flare= day===30 ? 1+.8*(1-outCubic((t-tickEnd)/1.2)) : .55+.45*p;
+    for(const ray of rays){
+      const a=ray.a+t*.05*(ray.s-.5);
+      const r0=150, r1=r0+ray.l*820*flare*intro;
+      bg.strokeStyle=`rgba(255,${110+ray.s*60|0},50,${.12+.35*ray.s})`;
+      bg.lineWidth=ray.w;
+      bg.beginPath();bg.moveTo(960+Math.cos(a)*r0,470+Math.sin(a)*r0);bg.lineTo(960+Math.cos(a)*r1,470+Math.sin(a)*r1);bg.stroke();
+    }
+    camIn(t);
+  };
+};
+
+// 0:17 — a month of runs flying past on a tilted wall
+SCENES.scrub=()=>{
+  stage.style.background='#0c0b0a';
+  const world=el('div','abs'); Object.assign(world.style,{left:'50%',top:'50%',width:'0',height:'0',perspective:'1600px'});
+  const wall=el('div','abs',world); Object.assign(wall.style,{left:'-900px',top:'-540px',width:'1800px',transformStyle:'preserve-3d'});
+  const r=rng(5), agents=[['Scout','#7fc4d6','RESEARCH'],['Ridge','#ffb13d','JUDGMENT'],['Atlas','#8fd694','DESIGN']];
+  const cards=[]; const cols=5, total=260;
+  for(let i=0;i<total;i++){
+    const day=1+Math.floor(i/(total/30)); const ag=i%9===0?agents[1+(i%2)]:agents[0];
+    const c=el('div','runcard',wall,
+      `<div class="d">Day ${String(day).padStart(2,'0')}</div><div class="m">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][(day-1)%7]} ${String(7+(i*2)%16).padStart(2,'0')}:${r()<.5?'00':'30'} · ${ag[0]}</div>
+       <span class="s" style="background:${ag[1]};box-shadow:0 0 12px ${ag[1]}"></span><span class="a" style="color:${ag[1]}">${ag[2]}</span>`);
+    c.style.left=((i%cols)*360)+'px'; c.style.top=(Math.floor(i/cols)*140)+'px';
+    cards.push(c);
+  }
+  const fog=el('div','fill'); fog.style.background='linear-gradient(#0c0b0a 0%,transparent 26%,transparent 70%,#0c0b0a 100%)';
+  const head=el('div','abs'); Object.assign(head.style,{left:'110px',top:'90px'});
+  head.innerHTML='<div class="kicker">Thread history</div><div class="mega" style="font-size:120px;margin-top:14px"><span id="rc">0</span> runs</div>';
+  const rc=head.querySelector('#rc');
+  const camIn=cam(.1);
+  const rows=Math.ceil(total/cols), travel=(rows-7)*140;
+  return t=>{
+    const k=inOut(t/S.duration);
+    wall.style.transform=`rotateX(34deg) rotateZ(-10deg) translateY(${-k*travel}px)`;
+    // motion blur proportional to speed
+    const v=Math.abs(inOut((t+.03)/S.duration)-k)/.03*travel;
+    wall.style.filter=`blur(${Math.min(5,v/900)}px)`;
+    rc.textContent=Math.round(k*total);
+    head.style.opacity=ramp(t,.1,.5);
+    camIn(t);
+  };
+};
+
+// 0:24 — presenter, "5 THINGS BROKE" slams in on orange, tally settles
+SCENES.presenterFive=()=>{
+  faceFull(1.0,1.07);
+  const at=wordAt(0,'five');
+  const slab=el('div','fill'); slab.style.background='var(--orange)';
+  const txt=el('div','abs mega',slab); Object.assign(txt.style,{left:'120px',top:'250px',fontSize:'300px',color:'var(--ink)'});
+  txt.innerHTML='5 THINGS<br>BROKE.';
+  const sub=el('div','abs serif',slab); Object.assign(sub.style,{left:'128px',top:'800px',fontSize:'54px',fontStyle:'italic',color:'#2a130a'});
+  sub.textContent='None of them looked like an error.';
+  const tl=tally(0,at);
+  const pills=[
+    [0,'quietly','Every one broke <em>quietly</em>'],
+    [1,'watching','When nobody is <em>watching</em>'],
+  ].map(([ln,w,h])=>{const p=el('div','pill','',h);p.style.opacity=0;return [wordAt(ln,w),p]});
+  return t=>{
+    const inK=ramp(t,at-.05,.35,outExpo), outK=ramp(t,at+1.55,.4,inOut);
+    slab.style.clipPath=`inset(0 ${100-inK*100}% 0 ${outK*100}%)`;
+    txt.style.transform=`translateX(${(1-inK)*-120}px) scale(${1+.03*(t-at)})`;
+    sub.style.opacity=ramp(t,at+.35,.3);
+    tl(t);
+    for(const [s,p] of pills){
+      const a=ramp(t,s-.15,.3), b=1-ramp(t,s+1.6,.3);
+      const k=Math.min(a,b); p.style.opacity=k;
+      p.style.transform=`translateX(-50%) translateY(${(1-spring((t-s+.15)/.6))*40}px) scale(${lerp(.92,1,a)})`;
+    }
+  };
+};
+
+// 0:44 — Scout → Ridge → Atlas, connectors glowing, each node on its sentence
+SCENES.spine=()=>{
+  stage.style.background='#0c0b0a';
+  const grid=el('div','fill'); grid.style.background='radial-gradient(circle,#2a2520 1.6px,transparent 1.8px) 0 0/44px 44px';
+  const cam3=el('div','fill');
+  const head=el('div','abs',cam3); Object.assign(head.style,{left:'120px',top:'96px'});
+  head.innerHTML='<div class="kicker">The team</div><div class="mega" style="font-size:96px;margin-top:14px">3 agents. <span style="color:var(--orange)">1 job each.</span></div>';
+  const svgNS='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(svgNS,'svg'); svg.setAttribute('width',1920);svg.setAttribute('height',1080);
+  svg.style.position='absolute'; cam3.appendChild(svg);
+  const defs=document.createElementNS(svgNS,'defs'); defs.innerHTML='<filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="1920" height="1080"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+  svg.appendChild(defs);
+  const data=[
+    ['Scout','RESEARCH','#7fc4d6','S','What launched in AI. A source and a date on every item. Five, then stop.'],
+    ['Ridge','JUDGMENT','#ffb13d','R','Which items are worth a video, and which are already saturated.'],
+    ['Atlas','DESIGN','#8fd694','A','A page with a cover image per item, ready for an editor.'],
+  ];
+  const X=[200,760,1320], Y=280, NW=400;
+  const nodes=data.map(([n,role,col,ic,job],i)=>{
+    const d=el('div','node',cam3,`<div class="ic" style="background:${col}">${ic}</div><h3>${n}</h3><div class="role" style="color:${col}">${role}</div><p>${job}</p>`);
+    d.style.left=X[i]+'px'; d.style.top=Y+'px'; return d;
+  });
+  const links=[0,1].map(i=>{
+    const p=document.createElementNS(svgNS,'path');
+    const x0=X[i]+NW, x1=X[i+1], y=Y+150;
+    p.setAttribute('d',`M${x0+10} ${y} C ${x0+70} ${y}, ${x1-70} ${y}, ${x1-10} ${y}`);
+    p.setAttribute('stroke','#ff5a1f');p.setAttribute('stroke-width','5');p.setAttribute('fill','none');p.setAttribute('filter','url(#glow)');
+    svg.appendChild(p);
+    const dot=document.createElementNS(svgNS,'circle');dot.setAttribute('r','9');dot.setAttribute('fill','#fff');dot.setAttribute('filter','url(#glow)');svg.appendChild(dot);
+    const len=x1-x0-20; p.style.strokeDasharray=len; return {p,dot,x0:x0+10,len,y};
+  });
+  const camIn=cam(.3,270);
+  const tl=tally(0);
+  return t=>{
+    head.style.opacity=ramp(t,.1,.6); head.style.transform=`translateY(${(1-ramp(t,.1,.6))*30}px)`;
+    nodes.forEach((d,i)=>{
+      const s=S.lines[i+1].t0-.1, k=spring((t-s)/.8);
+      d.style.opacity=clamp((t-s)*3);
+      d.style.transform=`translateY(${(1-k)*80}px) scale(${lerp(.9,1,clamp(k))})`;
+      const lit= t>=s && (i===2 || t<S.lines[i+2].t0-.1);
+      d.style.boxShadow= lit?`0 0 0 2px ${data[i][2]},0 0 70px ${data[i][2]}55,0 40px 80px rgba(0,0,0,.5)`:'0 0 0 1px rgba(255,255,255,.07),0 40px 80px rgba(0,0,0,.5)';
+    });
+    links.forEach((L,i)=>{
+      const s=S.lines[i+2].t0-.35, g=ramp(t,s,.6);
+      L.p.style.strokeDashoffset=L.len*(1-g);
+      const ph=((t-s)*.7)%1; L.dot.setAttribute('cx',L.x0+L.len*ph); L.dot.setAttribute('cy',L.y);
+      L.dot.style.opacity= g>=1?1:0;
+    });
+    // slow camera drift
+    const k=inOut(t/S.duration);
+    cam3.style.transform=`scale(${lerp(1.0,1.05,k)}) translateX(${lerp(8,-8,k)}px)`;
+    camIn(t); tl(t);
+  };
+};
+
+// 1:18 — presenter, kinetic RESEARCH / JUDGMENT / DESIGN
+SCENES.presenterWords=()=>{
+  faceFull(1.04,1.1);
+  const shade=el('div','fill'); shade.style.background='linear-gradient(90deg,rgba(12,11,10,.88) 0%,rgba(12,11,10,.55) 36%,transparent 60%)';
+  const words=[['research','Research.','#7fc4d6'],['judgment','Judgment.','#ffb13d'],['design','Design.','#8fd694']]
+    .map(([w,label,col],i)=>{const d=el('div','abs mega',null,label);
+      Object.assign(d.style,{left:'110px',top:(290+i*160)+'px',fontSize:'140px',color:col});
+      return [wordAt(0,w),d]});
+  const tagline=el('div','abs serif',null,'One each. <i>Deliberately no use at the other two.</i>');
+  Object.assign(tagline.style,{left:'116px',top:'860px',fontSize:'44px',color:'var(--cream)'});
+  const tl=tally(0);
+  return t=>{
+    shade.style.opacity=ramp(t,0,.4);
+    for(const [s,d] of words){const k=spring((t-s+.05)/.55);
+      d.style.opacity=clamp((t-s+.05)*6); d.style.transform=`translateX(${(1-k)*-90}px)`;}
+    tagline.style.opacity=ramp(t,wordAt(0,'one')-.1,.4);
+    tl(t);
+  };
+};
+
+// 1:24 — cream paper: the schedule, then the deal
+SCENES.schedule=()=>{
+  stage.className='paper'; stage.style.background='var(--paper)';
+  const head=el('div','abs serif'); Object.assign(head.style,{left:'470px',top:'110px',fontSize:'78px',lineHeight:'1.05',color:'var(--ink)',width:'1300px'});
+  head.innerHTML='Scout never sleeps.<br><i style="color:#8a7b68">The others wake on Mondays.</i>';
+  const sheet=el('div','sheet'); Object.assign(sheet.style,{left:'470px',top:'340px',width:'1150px'});
+  const rows=[['Scout','#1e8fb0','interval · noticing is the job','Every 30 min','var(--orange)','#fff'],
+              ['Ridge','#d98a00','weekly · waits for new items','Mon · 07:00','#15120f','#fff'],
+              ['Atlas','#4a9a50','weekly · waits for survivors','Mon · 07:00','#15120f','#fff']]
+    .map(([n,c,k,w,bgc,fg])=>el('div','row',sheet,`<span class="dot" style="background:${c}"></span><span class="nm">${n}</span><span class="kd">${k}</span><span class="when" style="background:${bgc};color:${fg}">${w}</span>`));
+  const deal=el('div','abs mega'); Object.assign(deal.style,{left:'470px',top:'770px',fontSize:'128px',color:'var(--ink)'});
+  deal.innerHTML='4 weeks <span style="color:var(--orange)">→</span> 4 pages';
+  const face=el('div','cam'); Object.assign(face.style,{left:'70px',bottom:'auto',top:'340px',width:'340px',height:'400px',boxShadow:'0 40px 80px rgba(60,40,20,.3),0 0 0 6px #fbf8f2'});
+  const c=el('canvas','',face); c.width=340;c.height=400; faceCanvases.push({canvas:c,kind:'bubble'});
+  const tl=tally(0);
+  const dealAt=wordAt(0,'deal'), sched=S.lines[0].t0;
+  return t=>{
+    head.style.opacity=ramp(t,0,.5); head.style.transform=`translateY(${(1-ramp(t,0,.6))*24}px)`;
+    const sk=spring(t/.9); sheet.style.transform=`translateY(${(1-sk)*120}px)`; sheet.style.opacity=clamp(t*3);
+    rows.forEach((r,i)=>{const s=sched+.4+i*1.1; const k=ramp(t,s,.35);
+      r.querySelector('.when').style.transform=`scale(${lerp(.6,1,spring((t-s)/.6))})`;
+      r.querySelector('.when').style.opacity=k;});
+    const dk=spring((t-dealAt)/.7); deal.style.opacity=clamp((t-dealAt)*5); deal.style.transform=`translateY(${(1-dk)*60}px)`;
+    const fk=spring((t-.2)/.9); face.style.transform=`translateX(${(1-fk)*-420}px)`;
+    tl(t);
+  };
+};
+
+// 1:40 — orange scorecard: 4 PAGES struck, what actually arrived
+SCENES.scorecard=()=>{
+  stage.style.background='var(--orange)';
+  const big=el('div','abs mega'); Object.assign(big.style,{left:0,right:0,top:'150px',textAlign:'center',fontSize:'250px',color:'var(--ink)'});
+  big.textContent='4 PAGES';
+  const slash=el('div','abs'); Object.assign(slash.style,{left:'430px',top:'265px',height:'26px',width:'1060px',background:'#fff',transformOrigin:'left center',borderRadius:'13px'});
+  const stats=[['2','pages','pages'],['1','empty run','empty'],['1','unusable','use']].map(([n,l,w],i)=>{
+    const d=el('div','abs',null,`<div class="mega" style="font-size:230px;color:#fff">${n}</div><div style="font-weight:900;font-size:46px;color:var(--ink);margin-top:12px;letter-spacing:-.01em">${l}</div>`);
+    Object.assign(d.style,{left:(300+i*480)+'px',top:'470px',width:'420px',textAlign:'center'});
+    return [wordAt(0,w),d]});
+  const bill=el('div','abs serif',null,'…and a bill that didn’t match any of it.');
+  Object.assign(bill.style,{left:0,right:0,top:'930px',textAlign:'center',fontSize:'56px',fontStyle:'italic',color:'#2a130a'});
+  const tl=tally(0); const camIn=cam(.2);
+  const billAt=wordAt(0,'bill');
+  return t=>{
+    big.style.opacity=ramp(t,0,.25); big.style.transform=`scale(${lerp(1.15,1,ramp(t,0,.5,outExpo))})`;
+    const sk=ramp(t,.55,.35,outExpo); slash.style.transform=`rotate(-4deg) scaleX(${sk})`;
+    const up=ramp(t,1.2,.6,inOut);
+    big.style.top=(150-up*60)+'px'; big.style.color=up>0?`rgba(21,18,15,${1-.55*up})`:'var(--ink)';
+    slash.style.top=(265-up*60)+'px'; slash.style.opacity=1-.4*up;
+    for(const [s,d] of stats){const k=spring((t-s+.1)/.7); d.style.opacity=clamp((t-s+.1)*5); d.style.transform=`translateY(${(1-k)*90}px)`;}
+    bill.style.opacity=ramp(t,billAt,.5);
+    tl(t); camIn(t);
+  };
+};
+
+// ------------------------------------------------------------------ API
+window.setup=function(shot){
+  S=shot; stage.innerHTML=''; stage.className=''; stage.style.background=''; faceCanvases.length=0;
+  scene=SCENES[shot.scene]();
+  return document.fonts.ready.then(()=>true);
+};
+window.seek=function(t,frame){
+  scene(t); drawFaces(t); drawGrain(frame);
+  // fade from black at the head of the cut, to black at the tail
+  const fade=S.fadeIn?clamp(t/.4):1, tail=S.fadeOut?clamp((S.duration-t)/.6):1;
+  document.body.style.opacity=Math.min(fade,tail);
+  document.documentElement.style.background='#000';
+};
+</script>
+</body>
+</html>
