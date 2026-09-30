@@ -61,13 +61,15 @@ class Shot:
     """A run of voiceover lines over one scene. Timing comes from the
     ElevenLabs character alignment in build/vo/<key>.json when it exists."""
 
-    def __init__(self, key, scene, lines, hold=0.0, **params):
+    def __init__(self, key, scene, lines, hold=0.0, trim=0.0, **params):
         self.key = key
         self.part = PART_OF[key[0]]  # Hedra take this shot's face comes from
         self.params = params        # scene options, passed through to the page
         self.scene = scene          # scene name in scenes/index.html
         self.lines = lines          # voiceover sentences covered by this shot
         self.hold = hold            # silent tail, seconds
+        self.trim = trim            # seconds cut from the tail in the edit only;
+                                    # the Hedra take keeps them, so sync holds
         self.offset = 0.0           # start of this shot in the whole cut
         self.part_offset = 0.0      # start of this shot in its part's take
         self.starts, self.ends, self.words = [], [], []
@@ -107,6 +109,11 @@ class Shot:
             self.words.append({"w": text[i:j], "t0": begin[i], "t1": stop[j - 1], "line": line})
             i = j
 
+    @property
+    def length(self):
+        """Seconds this shot occupies in the finished cut."""
+        return self.duration - self.trim
+
     def spec(self, first, last):
         return {"key": self.key, "scene": self.scene, "duration": self.duration,
                 "lines": [{"t0": a, "t1": b} for a, b in zip(self.starts, self.ends)],
@@ -142,7 +149,7 @@ SHOTS = [
     ]),
     Shot("b4", "scorecard", [
         "What I got was two pages, one empty run, one page I couldn't use, and a bill that didn't match any of it.",
-    ], hold=3.0),
+    ], hold=3.0, trim=2.6),
     # 1:10 week one is the trap
     Shot("c1", "weekOne", [
         "Week one is genuinely good and that is the problem with week one.",
@@ -211,7 +218,7 @@ SHOTS = [
     ], tally=2),
     Shot("e6", "textCard", [
         "And you have to say it explicitly, because be selective is not a threshold, it's a mood.",
-    ], hold=1.5, tally=2, theme="paper", blocks=[
+    ], hold=1.5, trim=1.2, tally=2, theme="paper", blocks=[
         {"html": "&ldquo;Be selective&rdquo;", "at": [0, "selective"], "size": 150, "serif": True, "italic": True},
         {"html": "is not a threshold.", "at": [0, "threshold"], "size": 110},
         {"html": "It's a mood.", "at": [0, "mood"], "size": 110, "color": "var(--orange)"},
@@ -297,7 +304,7 @@ SHOTS = [
         "Every agent needs an explicit successful-but-empty outcome, described, so that handing back nothing is a result rather than a failure it will work around.",
         "Every handoff brief gets written as if the receiving agent has amnesia, because it does, and that includes the format the inputs arrive in and not just their existence.",
         "And every agent gets the smallest tool list that lets it finish, with a spend cap per run and the cheap model on anything recurring.",
-    ], hold=2.0, tally=5),
+    ], hold=2.0, trim=1.6, tally=5),
     # 7:10 the actual lesson
     Shot("j1", "presenter", [
         "But the thing underneath all four of those is about what supervision actually means, and I had it wrong for a month.",
@@ -339,12 +346,14 @@ SHOTS = [
 
 
 def layout():
+    """offset is where a shot sits in the cut (trimmed lengths); part_offset
+    is where it sits in its Hedra take (full durations, as voiced)."""
     clock, part_clock = 0.0, {}
     for shot in SHOTS:
         shot.offset = clock
         shot.part_offset = part_clock.get(shot.part, 0.0)
         part_clock[shot.part] = shot.part_offset + shot.duration
-        clock += shot.duration
+        clock += shot.length
     return clock
 
 
@@ -393,7 +402,7 @@ def render_shot(index):
     ff = ffmpeg_exe()
     out = BUILD / "shots" / f"{shot.key}.mp4"
     out.parent.mkdir(parents=True, exist_ok=True)
-    n = round(shot.duration * FPS)
+    n = round(shot.length * FPS)
     enc = subprocess.Popen(
         [ff, "-y", "-loglevel", "error", "-f", "image2pipe", "-c:v", "mjpeg", "-r", str(FPS),
          "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p",
@@ -412,7 +421,7 @@ def render_shot(index):
     enc.stdin.close()
     if enc.wait() != 0:
         raise RuntimeError(f"ffmpeg failed on shot {shot.key}")
-    return f"  {shot.key}: {shot.duration:5.1f}s  {n} frames"
+    return f"  {shot.key}: {shot.length:5.1f}s  {n} frames"
 
 
 # ---------------------------------------------------------------- audio + merge
@@ -431,8 +440,11 @@ def build_voiceover(ff, part=None):
     for s in shots:
         cmd += (["-i", str(BUILD / "vo" / f"{s.key}.mp3")] if s.lines else
                 ["-f", "lavfi", "-t", f"{s.duration:.3f}", "-i", "anullsrc=r=48000:cl=mono"])
+    # a part's track feeds Hedra, so it keeps full durations; the film's
+    # track follows the cut
+    dur = (lambda s: s.duration) if part else (lambda s: s.length)
     chains = "".join(f"[{i}:a]aresample=48000,aformat=channel_layouts=mono,apad,"
-                     f"atrim=0:{s.duration:.3f}[a{i}];" for i, s in enumerate(shots))
+                     f"atrim=0:{dur(s):.3f}[a{i}];" for i, s in enumerate(shots))
     chains += "".join(f"[a{i}]" for i in range(len(shots)))
     chains += f"concat=n={len(shots)}:v=0:a=1[out]"
     subprocess.run(cmd + ["-filter_complex", chains, "-map", "[out]", "-ac", "1", str(out)],
@@ -444,7 +456,7 @@ def merge(ff):
     listing = BUILD / "shots.txt"
     listing.write_text("".join(f"file 'shots/{s.key}.mp4'\n" for s in SHOTS))
     out = BUILD / "video-a.mp4"
-    total = sum(s.duration for s in SHOTS)
+    total = sum(s.length for s in SHOTS)
     vo = build_voiceover(ff)
     audio = ["-i", str(vo)] if vo else ["-f", "lavfi", "-t", f"{total:.3f}",
                                         "-i", "anullsrc=r=48000:cl=stereo"]
